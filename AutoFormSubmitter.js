@@ -1,19 +1,42 @@
 const puppeteer = require('puppeteer');
 
+
 const fs = require('fs');
-const HEADLESS = false;
+const IS_HEADLESS = false;
 let browser;
 let results = {successCount: 0, failedCount: 0};
+function call_back_code(isSuccess) {
+    if (isSuccess)
+        results.successCount += 1;
+    else
+        results.failedCount += 1;
+    console.table([results]);
+}
 const xpaths = {
+    form: ["//form[contains(@action, 'contact') or @action='']"],
     name: ["//input[contains(@name, 'name') and not(@name='username')]"],
     email: ["//input[contains(@name, 'email')]"],
     subject: ["//input[contains(@name, 'subject')]"],
-    message: ["//textarea[contains(@name, 'message')]"]
+    message: ["//textarea[contains(@name, 'message')]"],
+    submit: ["//input[@type='submit']"]
+}
+let urls = fs.readFileSync('test-inputs.txt', {encoding: 'utf-8', flag: 'r'}).split('\r\n');
+submitContactForms(urls, {
+    name: "test name",
+    email: "test@some-mail.com",
+    subject: "Network",
+    message: "Hi, how are you?"
+}, call_back_code);
+
+async function handleCDPSession(page) {
+    let session = await page.target().createCDPSession();
+    await session.send("Page.enable");
+    await session.send("Page.setWebLifecycleState", {state: "active"});
 }
 
 async function start_browser() {
     browser = await puppeteer.launch({
-        headless: HEADLESS,
+        headless: IS_HEADLESS,
         defaultViewport: null,
         args: ['--disable-web-security',
             '--allow-running-insecure-content',
@@ -24,41 +47,28 @@ async function start_browser() {
     //page = await browser.newPage();
 
 }
+async function submitContactForms(formsUrls, values, callback) {
+    await start_browser();
+    // formsUrls = [];
+    let page = (await browser.pages())[0];
+    await handleCDPSession(page);
 
-async function handleCDPSession(page) {
-    let session = await page.target().createCDPSession();
-    await session.send("Page.enable");
-    await session.send("Page.setWebLifecycleState", {state: "active"});
+    for (const formsUrl of formsUrls) {
+        let isSuccess = await submitContactForm(formsUrl, page, values);
+        callback(isSuccess); // callback is running for each form submission
+    }
+    await browser.close()
+
 }
-
-async function setInputValue(form, xpath, value) {
-    let result = true, input_element;
-    try{
-        input_element = (await form.$x(xpath))[0];
-    }catch (e) {
+async function submitContactForm(formUrl, page, values) {
+    try {
+        await page.goto(formUrl);
+    } catch (e) {
         return false;
     }
-    await form.evaluate((frm, input, val) => input.value = val, input_element, value).catch(e => result = false);
-    return result;
-}
-
-async function tryFillingInputUsingXpaths(form, value, field_xpaths) {
-    for (const xpath of field_xpaths) {
-        if (await setInputValue(form, xpath, value)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-async function autoSubmitContactForm(formUrl, page, values) {
-    let load_error = false;
-    await page.goto(formUrl).catch(() => load_error=true);
-    if (load_error)
-        return false;
     let form;
     try {
-        form = (await page.$x("//form[contains(@action, 'contact') or @action='']"))[0];
+        form = (await page.$x(xpaths.form[0]))[0]; // it needs to iterate with all xpaths until not fetch exact form
     } catch (e) {
         return false;
     }
@@ -72,39 +82,22 @@ async function autoSubmitContactForm(formUrl, page, values) {
     return false;
 
 }
-function show_results(){
-    console.table([results]);
-}
-async function autoSubmitContactForms(formsUrls, values, callback) {
-    await start_browser();
-    // formsUrls = [];
-    let page = (await browser.pages())[0];
-    await handleCDPSession(page);
-    const responses = new Map();
-    page.on('response', response => responses.set(response.url, response));
-    page.on('load', () => {
-        const mainResource = responses.get(page.url());
-        console.log('Main resource status: ' + mainResource.status);
-    });
-    for (const formsUrl of formsUrls) {
-        let isSuccess = await autoSubmitContactForm(formsUrl, page, values);
-        callback(isSuccess);
+async function tryFillingInputUsingXpaths(form, value, field_xpaths) {
+    for (const xpath of field_xpaths) {
+        if (await setInputValue(form, xpath, value)) {
+            return true;
+        }
     }
-    await browser.close()
-
+    return false;
 }
 
-let urls = fs.readFileSync('test-inputs.txt', {encoding: 'utf-8', flag: 'r'}).split('\r\n');
-autoSubmitContactForms(urls, {
-    name: "test name",
-    email: "test@some-mail.com",
-    subject: "Network",
-    message: "Hi, how are you?"
-}, (isSuccess)=>{
-    if(isSuccess)
-        results.successCount += 1;
-    else
-        results.failedCount += 1;
-    show_results()
-});
-
+async function setInputValue(form, xpath, value) {
+    let result = true, input_element;
+    try {
+        input_element = (await form.$x(xpath))[0];
+    } catch (e) {
+        return false;
+    }
+    await form.evaluate((frm, input, val) => input.value = val, input_element, value).catch(e => result = false);
+    return result;
+}
