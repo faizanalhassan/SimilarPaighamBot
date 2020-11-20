@@ -1,10 +1,23 @@
 const puppeteer = require('puppeteer');
 
-const logger = {info: msg=>console.log(msg), error: error=>console.log(error), debug: msg => console.log(msg), set_level: ()=>{}, DEBUG: 1, INFO: 2, WARN:3, ERROR: 4, CRITICAL: 5};
+const logger = {
+    info: msg => console.log(msg),
+    error: error => console.log(error),
+    debug: msg => console.log(msg),
+    set_level: () => {},
+    DEBUG: 1,
+    INFO: 2,
+    WARN: 3,
+    ERROR: 4,
+    CRITICAL: 5
+};
+logger.set_level(logger.DEBUG);
+
 const fs = require('fs');
 const IS_HEADLESS = false;
 let browser;
 let results = {successCount: 0, failedCount: 0};
+
 function call_back_code(isSuccess) {
     if (isSuccess)
         results.successCount += 1;
@@ -12,6 +25,7 @@ function call_back_code(isSuccess) {
         results.failedCount += 1;
     console.table([results]);
 }
+
 const xpaths = {
     form: ["//form[contains(@action, 'contact') or @action='']"],
     name: ["//input[contains(@name, 'name') and not(@name='username')]"],
@@ -47,6 +61,7 @@ async function start_browser() {
     //page = await browser.newPage();
 
 }
+
 async function submitContactForms(formsUrls, values, callback) {
     await start_browser();
     // formsUrls = [];
@@ -54,12 +69,20 @@ async function submitContactForms(formsUrls, values, callback) {
     await handleCDPSession(page);
 
     for (const formsUrl of formsUrls) {
-        let isSuccess = await submitContactForm(formsUrl, page, values);
+        let isSuccess = false;
+        try{
+            isSuccess = await submitContactForm(formsUrl, page, values);
+        }catch (e) {
+            logger.error(e);
+        }
+        logger.debug(`Form submit: ${isSuccess}`);
         callback(isSuccess); // callback is running for each form submission
     }
+    logger.info("Job done closing browser");
     await browser.close()
 
 }
+
 async function submitContactForm(formUrl, page, values) {
     try {
         await page.goto(formUrl);
@@ -82,6 +105,7 @@ async function submitContactForm(formUrl, page, values) {
     return false;
 
 }
+
 async function tryFillingInputUsingXpaths(form, value, field_xpaths) {
     for (const xpath of field_xpaths) {
         if (await setInputValue(form, xpath, value)) {
