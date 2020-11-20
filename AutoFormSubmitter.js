@@ -1,8 +1,10 @@
 const puppeteer = require('puppeteer');
-
+const exceptions = require('./exceptions');
+const xpaths = require("./xpaths");
+// import * as exceptions from './exceptions';
 const logger = {
     info: msg => console.log(msg),
-    error: error => console.log(error),
+    error: (error, html, filename) => console.log(error, html, filename /* slugify filename also*/),
     debug: msg => console.log(msg),
     set_level: () => {},
     DEBUG: 1,
@@ -26,14 +28,7 @@ function call_back_code(isSuccess) {
     console.table([results]);
 }
 
-const xpaths = {
-    form: ["//form[contains(@action, 'contact') or @action='']"],
-    name: ["//input[contains(@name, 'name') and not(@name='username')]"],
-    email: ["//input[contains(@name, 'email')]"],
-    subject: ["//input[contains(@name, 'subject')]"],
-    message: ["//textarea[contains(@name, 'message')]"],
-    submit: ["//input[@type='submit']"]
-}
+
 let urls = fs.readFileSync('test-inputs.txt', {encoding: 'utf-8', flag: 'r'}).split('\r\n');
 submitContactForms(urls, {
     name: "test name",
@@ -73,7 +68,9 @@ async function submitContactForms(formsUrls, values, callback) {
         try{
             isSuccess = await submitContactForm(formsUrl, page, values);
         }catch (e) {
-            logger.error(e);
+            //let page_html = await page.evaluate(() => document.documentElement.outerHTML);
+            let page_html = null;
+            logger.error(e, page_html, formsUrl);
         }
         logger.debug(`Form submit: ${isSuccess}`);
         callback(isSuccess); // callback is running for each form submission
@@ -89,20 +86,22 @@ async function submitContactForm(formUrl, page, values) {
     } catch (e) {
         return false;
     }
-    let form;
-    try {
-        form = (await page.$x(xpaths.form[0]))[0]; // it needs to iterate with all xpaths until not fetch exact form
-    } catch (e) {
-        return false;
+    let form = await find_element_by_xpaths(xpaths.form, page);
+    if(await isFormSubmitError(form))
+    {
+        throw new exceptions.SubmitErrorsBeforeFormSubmission();
     }
+
     for (const field_name of ["name", "email", "subject", "message"]) {
         if (!(await tryFillingInputUsingXpaths(form, values[field_name], xpaths[field_name]))) {
             return false;
         }
     }
-
-    await form.evaluate((frm, input) => input.click())
-    return false;
+    // let submit_element = (await form.$x(xpaths.submit[0]))[0];
+    let submit_element = await find_element_by_xpaths(xpaths.submit, form);
+    // logger.debug(`submit elements: ${(await form.$x(xpaths.submit[0])).length}`);
+    await form.evaluate((frm, input) => input.click(), submit_element);
+    return true;
 
 }
 
@@ -116,12 +115,33 @@ async function tryFillingInputUsingXpaths(form, value, field_xpaths) {
 }
 
 async function setInputValue(form, xpath, value) {
-    let result = true, input_element;
+    let input_element;
     try {
         input_element = (await form.$x(xpath))[0];
     } catch (e) {
         return false;
     }
-    await form.evaluate((frm, input, val) => input.value = val, input_element, value).catch(e => result = false);
-    return result;
+    await form.evaluate((frm, input, val) => input.value = val, input_element, value);
+    return true;
+}
+
+async function find_element_by_xpaths(xpaths, parent) {
+    for (const xpath of xpaths) {
+        let elements = await parent.$x(xpath);
+        if(elements.length){
+            return elements[0];
+        }
+    }
+    throw exceptions.NoSuchElementFound
+
+}
+async function isFormSubmitError(form){
+    try {
+        return  await find_element_by_xpaths(xpaths.submitErrors, form);
+    }catch (e) {
+        if(!(e instanceof exceptions.NoSuchElementFound)){
+            throw e;
+        }
+    }
+    return false;
 }
