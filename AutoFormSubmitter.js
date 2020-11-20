@@ -1,6 +1,6 @@
 const puppeteer = require('puppeteer');
 
-
+const logger = {info: msg=>console.log(msg), error: error=>console.log(error), debug: msg => console.log(msg), set_level: ()=>{}, DEBUG: 1, INFO: 2, WARN:3, ERROR: 4, CRITICAL: 5};
 const fs = require('fs');
 const IS_HEADLESS = false;
 let browser;
