@@ -17,6 +17,7 @@ logger.set_level(logger.DEBUG);
 
 const fs = require('fs');
 const IS_HEADLESS = false;
+const MAX_LOAD_TIME = 30000; // We can get input this value
 let browser;
 let results = {successCount: 0, failedCount: 0};
 
@@ -35,7 +36,7 @@ submitContactForms(urls, {
     email: "test@some-mail.com",
     subject: "Network",
     message: "Hi, how are you?"
-}, call_back_code);
+}, call_back_code).then(()=>console.log('program end')).catch(e=>logger.error(e, "","program end" ));
 
 async function handleCDPSession(page) {
     let session = await page.target().createCDPSession();
@@ -62,34 +63,39 @@ async function submitContactForms(formsUrls, values, callback) {
     // formsUrls = [];
     let page = (await browser.pages())[0];
     await handleCDPSession(page);
-
     for (const formsUrl of formsUrls) {
         let isSuccess = false;
         try{
             isSuccess = await submitContactForm(formsUrl, page, values);
-        }catch (e) {
-            //let page_html = await page.evaluate(() => document.documentElement.outerHTML);
-            let page_html = null;
-            logger.error(e, page_html, formsUrl);
+        } catch (e) {
+            if (e.name === "TimeoutError" || e.message.includes("ERR_CONNECTION_TIMED_OUT"))
+            {
+                logger.info("TimeoutError");
+                // ignore
+            }else {
+                //let page_html = await page.evaluate(() => document.documentElement.outerHTML);
+                let page_html = null;
+                logger.error(e, page_html, formsUrl);
+            }
         }
-        logger.debug(`Form submit: ${isSuccess}`);
+        logger.debug(`URL: ${formsUrl}, submit: ${isSuccess}`);
         callback(isSuccess); // callback is running for each form submission
     }
     logger.info("Job done closing browser");
-    await browser.close()
-
+    let pages = await browser.pages();
+    for (const page of pages) {
+        await page.close().catch(e => logger.error(e, 'Got Error closing pages'));
+    }
+    await browser.close().catch(e => logger.error(e, 'Got Error in closing browser'));
 }
 
 async function submitContactForm(formUrl, page, values) {
-    try {
-        await page.goto(formUrl);
-    } catch (e) {
-        return false;
-    }
+    await page.goto(formUrl, {timeout: MAX_LOAD_TIME});
+    await page.mainFrame().waitForSelector("form", {timeout: 10000});
     let form = await find_element_by_xpaths(xpaths.form, page);
-    if(await isFormSubmitError(form))
+    if(await isFormSubmitSuccess(form))
     {
-        throw new exceptions.SubmitErrorsBeforeFormSubmission();
+        throw new exceptions.SubmitSuccessBeforeFormSubmission;
     }
 
     for (const field_name of ["name", "email", "subject", "message"]) {
@@ -101,7 +107,13 @@ async function submitContactForm(formUrl, page, values) {
     let submit_element = await find_element_by_xpaths(xpaths.submit, form);
     // logger.debug(`submit elements: ${(await form.$x(xpaths.submit[0])).length}`);
     await form.evaluate((frm, input) => input.click(), submit_element);
-    return true;
+    await page.waitForTimeout(2000);
+    await page.mainFrame().waitForSelector("form", {timeout: 10000});
+    form = await find_element_by_xpaths(xpaths.form, page);
+    if(await isFormSubmitSuccess(form)){
+        return true;
+    }
+    return false;
 
 }
 
@@ -132,12 +144,23 @@ async function find_element_by_xpaths(xpaths, parent) {
             return elements[0];
         }
     }
-    throw exceptions.NoSuchElementFound
+    throw new exceptions.NoSuchElementFound
 
 }
 async function isFormSubmitError(form){
     try {
         return  await find_element_by_xpaths(xpaths.submitErrors, form);
+    }catch (e) {
+        if(!(e instanceof exceptions.NoSuchElementFound)){
+            throw e;
+        }
+    }
+    return false;
+}
+
+async function isFormSubmitSuccess(form){
+    try {
+        return  await find_element_by_xpaths(xpaths.submitSuccess, form);
     }catch (e) {
         if(!(e instanceof exceptions.NoSuchElementFound)){
             throw e;
