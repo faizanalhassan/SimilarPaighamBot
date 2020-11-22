@@ -1,46 +1,58 @@
 const puppeteer = require('puppeteer');
 const exceptions = require('./exceptions');
 const xpaths = require("./xpaths");
-const client = require("./client").client;
+// const client = require("./client").client;
 const logger = require("./logger");
 
-// const logger = {
-//     info: msg => console.log(msg),
-//     error: (error, html, filename) => console.log(error, html, filename /* slugify filename also*/),
-//     debug: msg => {
-//     }/*console.log(msg)*/,
-//     set_level: () => {
-//     },
-//     DEBUG: 1,
-//     INFO: 2,
-//     WARN: 3,
-//     ERROR: 4,
-//     CRITICAL: 5
-// };
-// logger.set_level(logger.DEBUG);
-
-// const fs = require('fs');
 const IS_HEADLESS = false;
 const MAX_TABS = 4;
+const urls_json = process.argv[2];
 const processName = `Process${process.argv[4]}`;
 logger.setProcessName(processName);
 const MAX_LOAD_TIME = parseInt(process.argv[3]); // We can get input this value
-logger.info(["MAX_LOAD_TIME:", MAX_LOAD_TIME]);
+const MAX_TIME_FOR_PAGE = parseInt(process.argv[5]); // We can get input this value
+const IS_TESTING = process.argv[6] === "test";
+
 let browser;
 let results = {successCount: 0, failedCount: 0};
-let arg_value = process.argv[2];
+
 // logger.debug(["arg_value:", arg_value]);
-let urls = JSON.parse(arg_value);
-logger.debug(`URLs: ${urls}`);
+let urls = JSON.parse(urls_json);
+// const fs = require('fs');
+// const urls = fs.readFileSync('test-inputs.txt', {encoding: 'utf-8', flag: 'r'}).trim().split('\r\n');
+logger.info(`MAX_LOAD_TIME: ${MAX_LOAD_TIME}, MAX_TIME_FOR_PAGE: ${MAX_TIME_FOR_PAGE}, URLs received: ${urls.length}`);
 
-
-function call_back_code(isSuccess) {
+async function safeExit(){
+    let pages = await browser.pages();
+    for (const page of pages) {
+        await page.close().catch(e => logger.debug(`${e} Got Error on closing pages in safe exit`));
+    }
+    await browser.close().catch(e => logger.debug(`${e} Got Error on closing browser in safe exit`));
+    logger.info('program exiting')
+    process.exit();
+}
+async function call_back_code(isSuccess) {
+    let objToSend;
     if (isSuccess) {
         results.successCount += 1;
-        client.send({successCount: 1, failedCount: 0});
+        // client.send();
+        objToSend = {successCount: 1, failedCount: 0}
     } else {
         results.failedCount += 1;
-        client.send({successCount: 0, failedCount: 1});
+        // client.send();
+        objToSend = {successCount: 0, failedCount: 1};
+    }
+    try{
+        if(!IS_TESTING)
+            process.send(objToSend);
+    }
+    catch(ex){
+        // This will come once parent dies.
+        // One way can be to check for error code ERR_IPC_CHANNEL_CLOSED
+        //     and call process.exit()
+        logger.info('parent died', ex.toString());
+        await safeExit();
+        // process.exit()
     }
     // client.send(results);
     // console.table([results]);
@@ -55,7 +67,9 @@ submitContactForms(urls, {
     email: "test@some-mail.com",
     subject: "Network",
     message: "Hi, how are you?"
-}, call_back_code).then(() => console.log('program end')).catch(e => logger.error(e, "", "program end"));
+}, call_back_code)
+    .catch(e => logger.error(e, "", "at program end"))
+    .finally(async ()=>{await safeExit();});
 
 async function handleCDPSession(page) {
     let session = await page.target().createCDPSession();
@@ -86,7 +100,7 @@ async function submitContactForms(formsUrls, values, callback) {
 
     for (const formsUrl of formsUrls) {
         let page = await browser.newPage();
-        await handleCDPSession(page);
+        // await handleCDPSession(page);
         let isSuccess = false;
         let info_msg = `URL: ${formsUrl}`;
         try {
@@ -100,45 +114,39 @@ async function submitContactForms(formsUrls, values, callback) {
                 // let page_html = null;
                 logger.error(e, page_html, formsUrl);
             }
+        } finally {
+            page.close().catch(e => logger.debug(`Got Error closing page: ${e}' in finally.`));
         }
         //logger.debug(`URL: ${formsUrl}, submit: ${isSuccess}`);
         logger.info(`Submit: ${isSuccess}, ` + info_msg)
         callback(isSuccess); // callback is running for each form submission
     }
-    logger.info("Job done closing browser");
-    let pages = await browser.pages();
-    for (const page of pages) {
-        await page.close().catch(e => logger.error(e, 'Got Error closing pages', 'Error-while-page-closing'));
-    }
-    await browser.close().catch(e => logger.error(e, 'Got Error in closing browser', 'error while browser closing'));
-    client.emit('end');
-    client.close();
-    process.exit()
+    logger.info("Job done.");
+
+    // client.emit('end');
+    // client.close();
+
 }
 
 async function submitContactForm(formUrl, page, values) {
     let done = false;
-    return new Promise(function (resolve, reject) {
-        setTimeout(() => {
-            if (!done) {
-                let msg = `Form ${formUrl} is taking too much time, may be internet issue.`;
-                logger.debug(msg);
-                page.close().catch(e => logger.error(e, 'Got Error closing pages', 'Error-while-page-closing on timeout'));
-                reject(new exceptions.PageLoadError(msg));
-            }
-        }, 1000 * 60 * 2);
-        _submitContactForm(formUrl, page, values)
-            .then((v) => {
-                resolve(v);
-            })
-            .catch((e) => {
-                reject(e);
-            })
-            .finally(() => {
-                done = true;
-                page.close().catch(e => logger.error(e, 'Got Error closing pages', 'Error-while-page-closing on contactForm'));
-            });
-    });
+    setTimeout(() => {
+        if (!done) {
+            let msg = `Form ${formUrl} took more time than MAX_TIME_FOR_PAGE: ${MAX_TIME_FOR_PAGE}.`;
+            logger.info(msg);
+            page.close().catch(e => logger.debug(`Got Error '${e}' on closing page on timeout`));
+            // reject(new exceptions.PageLoadError(msg));
+        }
+    }, MAX_TIME_FOR_PAGE);
+    try {
+        return await _submitContactForm(formUrl, page, values);
+    }catch (e) {
+        logger.info(e);
+        if(e.message.includes("Protocol error")){
+            return false;
+        }
+        throw e;
+    }
 
 }
 
@@ -192,7 +200,7 @@ async function _submitContactForm(formUrl, page, values) {
     // await page.mouse.click(x, y, {delay: 100})
     await submitElement.click()
 
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 7; i++) {
         logger.debug([i, 'submit check']);
         await page.waitForTimeout(1000);
         // await page.mainFrame().waitForSelector("form", {timeout: 10000});
@@ -253,6 +261,9 @@ async function findElementByXpaths(xpaths, parent, maxTriesOnExc = 1, maxTriesAl
                     break
             } catch (e) {
                 exception = e;
+                if(e.message === "Protocol error (Runtime.callFunctionOn): Session closed. Most likely the page has been closed."){
+                    throw e;
+                }
                 logger.debug(e.message);
             }
             // await delay(delayValue);

@@ -1,5 +1,5 @@
 const xpaths = {
-    form: ["//form[contains(@action, 'contact') or @action='' or contains(@class, 'wpcf7')]"],
+    form: ["//form[contains(@action, 'contact') or contains(@action, '#wpcf7') or @action='' or contains(@class, 'wpcf7')]"],
     name: [".//input[contains(@name, 'name') and not(@name='username')]"],
     email: [".//input[contains(@name, 'email')]"],
     subject: [".//input[contains(@name, 'subject')]"],

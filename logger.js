@@ -2,6 +2,7 @@ const fs = require('fs');
 const slugify = require('slugify');
 const constants = require('./constants');
 let processName = "ParentProcess";
+let IS_DEBUG = false;
 slugify.extend({':': '_'})
 slugify.extend({'.': '_'})
 if (!fs.existsSync(constants.ERROR_LOG_DIR)) {
@@ -22,7 +23,7 @@ function writeError(object, html, url) {
 
 function writeInfo(msg) {
     // let date_ob = new Date();
-    let data = `${processName} ${(new Date()).toJSON()} ${msg}\n`;
+    let data = `${processName} INFO ${(new Date()).toJSON()} ${msg}\n`;
     fs.writeFile(`${constants.INFO_FILE_NAME}`, data, {flag: "a"}, function (err) {
         if (err) throw err;
         console.log(data);
@@ -35,5 +36,9 @@ function setProcessName(name){
 // writeInfo({aman: "test"}, "html", "https://google.com/aman");
 module.exports.error = writeError;
 module.exports.info = writeInfo;
-module.exports.debug = (msg) => {console.log(`${processName} DEBUG ${(new Date()).toJSON()} ${msg}\n`)};
+module.exports.debug = (msg) => {
+    if (IS_DEBUG) {
+        console.log(`${processName} DEBUG ${(new Date()).toJSON()} ${msg}\n`)
+    }
+};
 module.exports.setProcessName = setProcessName;
