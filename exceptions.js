@@ -1,7 +1,7 @@
 function customException(name, message) {
-    function exception() {
+    function exception(extra) {
         this.name = name;
-        this.message = message;
+        this.message = message + " " + (extra || '');
 
         if ("captureStackTrace" in Error)
             Error.captureStackTrace(this, exception);
@@ -14,7 +14,10 @@ function customException(name, message) {
     module.exports[name] = exception;
 
 }
-customException("NoSuchElementFound", "Element not found with any of given xpaths");
+customException("NoSuchElementFound", "Probably your internet connection is not working well. Element not found with any of given xpaths");
 customException("SubmitErrorsBeforeFormSubmission", "Submit error xpaths must not match before form submission");
 customException("SubmitErrorsAfterSubmit", "Form might not successfully submitted.");
 customException("SubmitSuccessBeforeFormSubmission", "Submit success xpaths must not match before form submission");
+customException("CaptchaFound", "This url contains captcha");
+customException("SubmitSuccessErrorNotFound", "Could not find Submit success or error");
+customException("PageLoadError", "This page is not working correctly.");
