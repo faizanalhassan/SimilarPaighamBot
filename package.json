@@ -4,8 +4,6 @@
   "dependencies": {
     "child_process": "^1.0.2",
     "puppeteer": "^5.4.1",
-    "slugify": "^1.4.6",
-    "socket.io": "^3.0.3",
-    "socket.io-client": "^3.0.3"
+    "slugify": "^1.4.6"
   }
 }

@@ -17,7 +17,7 @@ let browser;
 let results = {successCount: 0, failedCount: 0};
 
 // logger.debug(["arg_value:", arg_value]);
-let urls = JSON.parse(urls_json);
+const urls = JSON.parse(urls_json);
 // const fs = require('fs');
 // const urls = fs.readFileSync('test-inputs.txt', {encoding: 'utf-8', flag: 'r'}).trim().split('\r\n');
 logger.info(`MAX_LOAD_TIME: ${MAX_LOAD_TIME}, MAX_TIME_FOR_PAGE: ${MAX_TIME_FOR_PAGE}, URLs received: ${urls.length}`);
@@ -45,6 +45,8 @@ async function call_back_code(isSuccess) {
     try{
         if(!IS_TESTING)
             process.send(objToSend);
+        else
+            logger.info(`objTosend:${JSON.stringify(objToSend)}, `)
     }
     catch(ex){
         // This will come once parent dies.
@@ -85,8 +87,10 @@ async function start_browser() {
             '--allow-running-insecure-content',
             '--disable-features=IsolateOrigins,site-per-process',
             '--no-sandbox',
+            '--blink-settings=imagesEnabled=false'
             // '--user-data-dir=puppeteer-data'
-        ]
+        ],
+        ignoreHTTPSErrors: true
     });
     //page = await browser.newPage();
 
@@ -100,6 +104,15 @@ async function submitContactForms(formsUrls, values, callback) {
 
     for (const formsUrl of formsUrls) {
         let page = await browser.newPage();
+        // await page.setRequestInterception(true);
+        // page.on('request', (req) => {
+        //     if(req.resourceType() === 'stylesheet' || req.resourceType() === 'font' || req.resourceType() === 'image'){
+        //         req.abort().catch(e=>logger.info(`Error on page.on('request'): ${e}`));
+        //     }
+        //     else {
+        //         req.continue();
+        //     }
+        // })
         // await handleCDPSession(page);
         let isSuccess = false;
         let info_msg = `URL: ${formsUrl}`;
@@ -115,7 +128,8 @@ async function submitContactForms(formsUrls, values, callback) {
                 logger.error(e, page_html, formsUrl);
             }
         } finally {
-            page.close().catch(e => logger.debug(`Got Error closing page: ${e}' in finally.`));
+            page.close()
+                .catch(e => logger.debug(`Got Error closing page: ${e}' in finally.`));
         }
         //logger.debug(`URL: ${formsUrl}, submit: ${isSuccess}`);
         logger.info(`Submit: ${isSuccess}, ` + info_msg)
@@ -134,18 +148,21 @@ async function submitContactForm(formUrl, page, values) {
         if (!done) {
             let msg = `Form ${formUrl} took more time than MAX_TIME_FOR_PAGE: ${MAX_TIME_FOR_PAGE}.`;
             logger.info(msg);
-            page.close().catch(e => logger.debug(`Got Error '${e}' on closing page on timeout`));
+            page.close()
+                .catch(e => logger.debug(`Got Error '${e}' on closing page on timeout`));
             // reject(new exceptions.PageLoadError(msg));
         }
     }, MAX_TIME_FOR_PAGE);
     try {
         return await _submitContactForm(formUrl, page, values);
     }catch (e) {
-        logger.info(e);
+        // logger.info(e);
         if(e.message.includes("Protocol error")){
             return false;
         }
         throw e;
+    } finally {
+        done = true;
     }
 
 }
@@ -156,27 +173,24 @@ async function _submitContactForm(formUrl, page, values) {
         await page.goto(formUrl, {timeout: MAX_LOAD_TIME});
     } catch (e) {
         exception = e;
-        // if(e.message.includes("ERR_CONNECTION_TIMED_OUT")||e.name === "TimeoutError"){
-        //     let element = await getIfElementExists(xpaths.pageLoadError, page, 5);
-        //     if(element){
-        //         let exception = new exceptions.PageLoadError;
-        //         exception.message = await element.evaluate(node => node.innerText);
-        //         throw exception;
-        //     }
-        // } else {
-        //     throw e;
-        // }
+
     }
-    let element = await getIfElementExists(xpaths.pageLoadError, page, 5);
-    if (element) {
-        let exc = new exceptions.PageLoadError;
-        exc.message = await element.evaluate(node => node.innerText);
-        throw exc;
+    let element = await getIfElementExists(xpaths.pageLoadError, page, 5, 2);
+    let page_title = (await page.title()).toLowerCase();
+    if (element || page_title.includes("404 not found") || page_title.includes("page not found") || page_title.includes("403 forbidden")) {
+        // exc.message = await element.evaluate(node => node.innerText);
+        throw new exceptions.PageLoadError;
     } else if (exception && !(exception.message.includes("ERR_CONNECTION_TIMED_OUT") || exception.name === "TimeoutError")) {
         throw exception;
     }
-    // await page.mainFrame().waitForSelector("form", {timeout: 20000});
-    let form = await findElementByXpaths(xpaths.form, page, 3, 20, 2000);
+    try {
+        await page.mainFrame().waitForSelector("form", {timeout: 20000});
+    }catch (e) {
+        if(e.name==="TimeoutError"){
+            throw new exceptions.FormNotExists;
+        }
+    }
+    let form = await findElementByXpaths(xpaths.form, page, 3, 5, 1000);
     if (await getIfElementExists(xpaths.captcha, form)) {
         throw new exceptions.CaptchaFound;
     }
@@ -202,13 +216,17 @@ async function _submitContactForm(formUrl, page, values) {
 
     for (let i = 0; i < 7; i++) {
         logger.debug([i, 'submit check']);
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(2000);
+
         // await page.mainFrame().waitForSelector("form", {timeout: 10000});
-        form = await findElementByXpaths(xpaths.form, page, 3, 10, 2000);
+        form = await findElementByXpaths(xpaths.form, page, 3, 5, 2000);
+        if(await getIfElementExists(xpaths.submitLoading, form)){
+            await page.waitForTimeout(2000);
+        }
         let submitStatusE;
         if ((submitStatusE = await getIfElementExists(xpaths.submitErrors, form))) {
-            let msg = await submitStatusE.evaluate(node => node.innerText);
-            if (msg === "There was an error trying to send your message. Please try again later.") {
+            let msg = await submitStatusE.evaluate(node => node.innerText.toLowerCase());
+            if (msg.includes("there was an error trying to send your message. please try again later.")) {
                 logger.info('trying again msg');
                 await delay(3000);
                 let submitElement = await findElementByXpaths(xpaths.submit, form);
@@ -220,7 +238,7 @@ async function _submitContactForm(formUrl, page, values) {
             return true;
         }
     }
-    throw new exceptions.SubmitSuccessErrorNotFound;
+    throw new exceptions.SubmitNeitherSuccessNorError;
 
 }
 
@@ -302,9 +320,9 @@ async function isFormSubmitSuccess(form) {
     return false;
 }
 
-async function getIfElementExists(xpaths, parent, maxTriesOnExc = 1, delayValue = 0) {
+async function getIfElementExists(xpaths, parent, maxTriesOnExc = 1, maxTriesAll=0, delayValue = 0) {
     try {
-        return await findElementByXpaths(xpaths, parent, maxTriesOnExc, delayValue);
+        return await findElementByXpaths(xpaths, parent, maxTriesOnExc, maxTriesAll, delayValue);
     } catch (e) {
         if (!(e instanceof exceptions.NoSuchElementFound)) {
             throw e;

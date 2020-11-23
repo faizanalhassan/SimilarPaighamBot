@@ -19,5 +19,6 @@ customException("SubmitErrorsBeforeFormSubmission", "Submit error xpaths must no
 customException("SubmitErrorsAfterSubmit", "Form might not successfully submitted.");
 customException("SubmitSuccessBeforeFormSubmission", "Submit success xpaths must not match before form submission");
 customException("CaptchaFound", "This url contains captcha");
-customException("SubmitSuccessErrorNotFound", "Could not find Submit success or error");
+customException("SubmitNeitherSuccessNorError", "Could not find Submit success or error");
 customException("PageLoadError", "This page is not working correctly.");
+customException("FormNotExists", "This page does not have contact form.");
