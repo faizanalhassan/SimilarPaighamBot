@@ -22,3 +22,5 @@ customException("CaptchaFound", "This url contains captcha");
 customException("SubmitNeitherSuccessNorError", "Could not find Submit success or error");
 customException("PageLoadError", "This page is not working correctly.");
 customException("FormNotExists", "This page does not have contact form.");
+customException("FormHasQuiz", "Form has quiz.");
+customException("FormTryAgainError", "Tried many times to submit form, but always says try again.");
